@@ -6,17 +6,9 @@
   <title>Vaccine Education Outreach Map</title>
 
   <!-- Leaflet -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-    crossorigin=""
-  />
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin=""
-  ></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
 
   <!-- PapaParse (CSV parser) -->
   <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
@@ -301,7 +293,7 @@
       },
       error: (err) => {
         console.error("CSV load error:", err);
-        alert("Could not load the CSV. Make sure vaccinetrack.csv is in the same folder as index.html and the name matches exactly.");
+        alert("Could not load the CSV. Make sure vaccinetrack.csv is in the same folder as index2.html and the name matches exactly.");
       }
     });
 
