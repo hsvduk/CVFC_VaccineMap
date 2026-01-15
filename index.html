@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Vaccine Outreach Reach Map</title>
+  <title>Vaccine Education Outreach Map</title>
 
   <!-- Leaflet -->
   <link
@@ -51,7 +51,7 @@
       border-radius: 12px;
       box-shadow: var(--shadow);
       padding: 10px 14px;
-      font-weight: 700;
+      font-weight: 800;
       letter-spacing: 0.2px;
       text-align: center;
       max-width: 92vw;
@@ -73,7 +73,7 @@
       padding: 10px 12px;
       font-size: 12px;
       line-height: 1.35;
-      max-width: 260px;
+      max-width: 290px;
     }
     .legend h4 {
       margin: 0 0 8px 0;
@@ -95,32 +95,32 @@
       border: 2px solid rgba(0,0,0,0.12);
       flex: 0 0 auto;
     }
+    .legend .note {
+      margin-top: 8px;
+      opacity: 0.85;
+    }
 
-    /* Always-visible label styling */
-    .site-label {
+    /* Draggable label box */
+    .label-box {
       background: white;
       border: 1px solid rgba(0,0,0,0.25);
-      padding: 5px 7px;
+      padding: 6px 8px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
       font-size: 11px;
       line-height: 1.25;
-      box-shadow: 0 1px 6px rgba(0,0,0,0.25);
-      border-radius: 8px;
-      white-space: nowrap;
+      white-space: normal;
+      width: 240px;           /* adjust if you want smaller boxes */
+      cursor: grab;
+      user-select: none;
     }
-    .site-label strong {
-      font-size: 11.5px;
-    }
+    .label-box:active { cursor: grabbing; }
+    .label-box strong { font-size: 11.5px; }
 
-    /* Make tooltip pointer less prominent */
-    .leaflet-tooltip-left:before,
-    .leaflet-tooltip-right:before {
-      border: none !important;
-    }
-
-    /* Optional: better for screenshots (keeps UI clean) */
-    @media print {
-      .title-panel, .legend { display: none; }
-      #map { height: 100vh; }
+    /* Make divIcon labels not add default marker padding */
+    .leaflet-div-icon {
+      background: transparent;
+      border: none;
     }
   </style>
 </head>
@@ -136,26 +136,30 @@
     <div class="legend-row"><span class="swatch" style="background:#6A1B9A"></span>Non-profit Organization</div>
     <div class="legend-row"><span class="swatch" style="background:#EF6C00"></span>Religious Organization</div>
     <div class="legend-row"><span class="swatch" style="background:#455A64"></span>Other / Unknown</div>
-    <div style="margin-top:8px; opacity:0.85;">
-      Labels are always visible (no hover/click). “~” indicates estimated reach.
+    <div class="note">
+      Zoom in to see labels (no hover/click). Drag labels to reposition; leader lines stay connected. “~” indicates estimated reach.
     </div>
   </div>
 
   <script>
-    // ✅ IMPORTANT:
-    // This is your CSV filename. It must be in the SAME folder as index.html in your GitHub repo.
-    // Your filename contains spaces, so we use URL encoding for the spaces.
+    // Your CSV must be in the SAME folder as index.html
     const CSV_FILE = "vaccinetrack.csv";
 
+    // Label visibility zoom threshold (change if desired)
+    const LABEL_ZOOM_THRESHOLD = 12;
+
+    // Store objects: { point, label, line, siteLatLng }
+    const markerObjects = [];
+
     // Color by Type
-    const typeColor = (t) => {
+    function typeColor(t) {
       const type = (t || "").trim().toLowerCase();
       if (type === "restaurant") return "#2E7D32";
       if (type === "store") return "#1565C0";
       if (type === "non-profit organization" || type === "nonprofit organization") return "#6A1B9A";
-      if (type === "religous organization" || type === "religious organization") return "#EF6C00"; // handles misspelling too
+      if (type === "religous organization" || type === "religious organization") return "#EF6C00"; // handles misspelling
       return "#455A64";
-    };
+    }
 
     // Initialize map
     const map = L.map("map", { zoomControl: true }).setView([44.79, -91.46], 11);
@@ -166,7 +170,38 @@
       attribution: "&copy; OpenStreetMap contributors"
     }).addTo(map);
 
-    // Parse & add points
+    // Helper: convert pixel offset from a LatLng to a new LatLng at current zoom
+    function offsetLatLng(baseLatLng, offsetPx) {
+      const p = map.latLngToLayerPoint(baseLatLng);
+      const p2 = L.point(p.x + offsetPx[0], p.y + offsetPx[1]);
+      return map.layerPointToLatLng(p2);
+    }
+
+    // Show/hide labels + leader lines based on zoom
+    function updateLabelVisibility() {
+      const zoom = map.getZoom();
+      const show = zoom >= LABEL_ZOOM_THRESHOLD;
+
+      markerObjects.forEach(obj => {
+        if (show) {
+          if (!map.hasLayer(obj.label)) obj.label.addTo(map);
+          if (!map.hasLayer(obj.line)) obj.line.addTo(map);
+        } else {
+          if (map.hasLayer(obj.label)) map.removeLayer(obj.label);
+          if (map.hasLayer(obj.line)) map.removeLayer(obj.line);
+        }
+      });
+    }
+
+    // Keep leader lines attached after zoom (and in general)
+    function refreshLeaderLines() {
+      markerObjects.forEach(obj => {
+        // siteLatLng doesn't change; label may have moved
+        obj.line.setLatLngs([obj.siteLatLng, obj.label.getLatLng()]);
+      });
+    }
+
+    // Load CSV and create points + draggable labels
     Papa.parse(CSV_FILE, {
       download: true,
       header: true,
@@ -175,34 +210,13 @@
         const rows = results.data || [];
         const bounds = [];
 
-        const marker = L.circleMarker([lat, lng], {
-          radius: 6,
-          color: color,
-          weight: 2,
-          fillColor: color,
-          fillOpacity: 0.95
-        }).addTo(map);
-
-        marker.bindTooltip(labelHtml, {
-          permanent: true,
-          direction: "right",
-          offset: [10, 0],
-          opacity: 1,
-          className: "site-label"
-        });
-        
-        // ✅ ADD THIS LINE
-        markers.push(marker);
-
-        rows.forEach((r) => {
+        rows.forEach((r, i) => {
           const name = (r["Institution"] || "").trim();
           const type = (r["Type"] || "").trim();
           const address = (r["Address"] || "").trim();
 
-          // Accept both numeric and string
           const lat = parseFloat(r["Latitude"]);
           const lng = parseFloat(r["Longitude"]);
-
           if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
 
           const reach = (r["Potential Reach (Monthly)"] || "").toString().trim();
@@ -211,8 +225,10 @@
           const other = (r["Other"] || "").toString().trim();
 
           const color = typeColor(type);
+          const siteLatLng = L.latLng(lat, lng);
 
-          const marker = L.circleMarker([lat, lng], {
+          // --- Point marker (always visible) ---
+          const point = L.circleMarker([lat, lng], {
             radius: 6,
             color: color,
             weight: 2,
@@ -220,54 +236,82 @@
             fillOpacity: 0.95
           }).addTo(map);
 
-          // Always-visible label (no hover/click required)
+          // --- Draggable label content ---
           const labelHtml = `
-            <strong>${escapeHtml(name || "Unknown site")}</strong><br>
-            ${escapeHtml(type || "Other / Unknown")}<br>
-            ${address ? escapeHtml(address) + "<br>" : ""}
-            <span><b>Reach:</b> ${escapeHtml(reach || "N/A")}</span><br>
-            <span><b>EN:</b> ${escapeHtml(en || "N/A")} &nbsp; <b>ES:</b> ${escapeHtml(es || "N/A")} &nbsp; <b>Other:</b> ${escapeHtml(other || "0")}</span>
+            <div class="label-box">
+              <strong>${escapeHtml(name || "Unknown site")}</strong><br>
+              ${escapeHtml(type || "Other / Unknown")}<br>
+              ${address ? escapeHtml(address) + "<br>" : ""}
+              <b>Reach:</b> ${escapeHtml(reach || "N/A")}<br>
+              <b>EN:</b> ${escapeHtml(en || "N/A")}
+              &nbsp; <b>ES:</b> ${escapeHtml(es || "N/A")}
+              &nbsp; <b>Other:</b> ${escapeHtml(other || "0")}
+            </div>
           `.trim();
 
-          marker.bindTooltip(labelHtml, {
-            permanent: true,
-            direction: "right",
-            offset: [10, 0],
-            opacity: 1,
-            className: "site-label"
+          // Initial label offsets to reduce collisions (fan out by index)
+          const offsetCycle = [
+            [90, 0],     // right
+            [-260, 0],   // left
+            [0, -120],   // up
+            [0, 120],    // down
+            [140, -90],  // up-right
+            [-300, -90], // up-left
+            [140, 90],   // down-right
+            [-300, 90]   // down-left
+          ];
+          const initialOffsetPx = offsetCycle[i % offsetCycle.length];
+          const labelLatLng = offsetLatLng(siteLatLng, initialOffsetPx);
+
+          // --- Draggable label marker (shown only when zoomed in) ---
+          const label = L.marker(labelLatLng, {
+            draggable: true,
+            interactive: true,
+            icon: L.divIcon({
+              className: "",
+              html: labelHtml
+            })
           });
 
+          // --- Leader line (shown only when zoomed in) ---
+          const line = L.polyline([siteLatLng, labelLatLng], {
+            weight: 1.5,
+            opacity: 0.7
+          });
+
+          // Update the line while dragging the label
+          label.on("drag", () => {
+            line.setLatLngs([siteLatLng, label.getLatLng()]);
+          });
+
+          // Save for zoom-based visibility + refresh logic
+          markerObjects.push({ point, label, line, siteLatLng });
+
+          // bounds for fit
           bounds.push([lat, lng]);
         });
 
         if (bounds.length) {
           map.fitBounds(bounds, { padding: [30, 30] });
         }
-        function updateLabelVisibility() {
-  const zoom = map.getZoom();
 
-  markers.forEach(marker => {
-    if (zoom >= 12) {
-      marker.openTooltip();   // show labels
-    } else {
-      marker.closeTooltip();  // hide labels
-    }
-  });
-}
-
-// Run once on load
-updateLabelVisibility();
-
-// Update whenever zoom changes
-map.on("zoomend", updateLabelVisibility);
+        // After fitBounds, apply zoom-based label visibility
+        updateLabelVisibility();
+        refreshLeaderLines();
       },
       error: (err) => {
         console.error("CSV load error:", err);
-        alert("Could not load the CSV. Make sure the CSV file is in the same folder as index.html and the name matches exactly.");
+        alert("Could not load the CSV. Make sure vaccinetrack.csv is in the same folder as index.html and the name matches exactly.");
       }
     });
 
-    // Simple HTML escape to keep tooltips safe/clean
+    // Update labels on zoom
+    map.on("zoomend", () => {
+      updateLabelVisibility();
+      refreshLeaderLines();
+    });
+
+    // Simple HTML escape
     function escapeHtml(str) {
       return String(str)
         .replaceAll("&", "&amp;")
